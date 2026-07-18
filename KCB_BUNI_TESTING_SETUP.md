@@ -134,8 +134,8 @@ Replace `your-domain.com` with your actual domain.
 4. Sale will complete automatically
 
 ### Test Phone Numbers (Sandbox Only)
-- **254700000000** - Generic test number
-- **254708374149** - Safaricom legacy test number (may work in some KCB sandbox configs)
+- **254700000000** - Official BUNI test number (Recommended)
+- **0720000000** - Same number in local format
 
 ### Test PIN
 - Any 4-digit PIN (e.g., 1234, 5678, 0000)
