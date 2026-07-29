@@ -35,7 +35,7 @@ export async function initiateSTKPush(
   }
 ): Promise<STKPushResponse> {
   try {
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/mpesa-stk`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/kcb-stk-push`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,12 +53,12 @@ export async function initiateSTKPush(
     try {
       const text = await response.text();
       if (!text) {
-        return { success: false, error: 'Empty response from M-Pesa service' };
+        return { success: false, error: 'Empty response from KCB service' };
       }
       data = JSON.parse(text);
     } catch (parseError) {
       console.error('[v0] JSON parse error in initiateSTKPush:', parseError);
-      return { success: false, error: 'Invalid response from M-Pesa service' };
+      return { success: false, error: 'Invalid response from KCB service' };
     }
 
     if (!response.ok) {
