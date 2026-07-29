@@ -105,11 +105,11 @@ export function POSTerminal() {
 
     setKCBEnabled(mpesa?.is_enabled ?? false);
     setKCBEnvironment(mpesa?.environment ?? 'sandbox');
-    // M-Pesa is "configured" when enabled + has consumer key + secret (minimum to attempt)
-    // passkey and short_code are validated at the edge function level with clear errors
+    // M-Pesa is "configured" when enabled + has client ID + secret (minimum to attempt)
+    // org_passkey and org_shortcode are validated at the edge function level with clear errors
     const hasCredentials = !!(mpesa?.is_enabled &&
-      mpesa.consumer_key &&
-      mpesa.consumer_secret);
+      mpesa.client_id &&
+      mpesa.client_secret);
     setKCBConfigured(hasCredentials);
   };
 
