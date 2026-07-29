@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Payment {
+  id                   String   @id @default(uuid())
+  provider             String
+  providerTransactionId String?  @map("provider_transaction_id")
+  merchantRequestId    String?  @map("merchant_request_id") @db.VarChar(128)
+  checkoutRequestId    String?  @map("checkout_request_id")
+  phoneNumber          String   @map("phone_number")
+  amount               Float
+  invoiceNumber        String   @map("invoice_number")
+  status               String
+  receiptNumber        String?  @map("receipt_number")
+  callbackPayload      Json?    @map("callback_payload")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([merchantRequestId], name: "idx_payments_merchant_request_id")
+  @@index([invoiceNumber], name: "idx_payments_invoice_number")
+}
