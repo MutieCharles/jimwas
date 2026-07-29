@@ -134,10 +134,10 @@ Deno.serve(async (req: Request) => {
     // Get environment-specific URLs
     const baseUrl = settings.environment === 'production'
       ? 'https://api.kcb.co.ke'
-      : 'https://sandbox.kcb.co.ke';
+      : 'https://api.sandbox.kcb.co.ke';
     
     const tokenUrl = `${baseUrl}/oauth/token`;
-    const stkPushUrl = `${baseUrl}/stk-push`;
+    const stkPushUrl = `${baseUrl}/stk/push`;
 
     // Get access token
     let token: string;
@@ -179,6 +179,8 @@ Deno.serve(async (req: Request) => {
     });
 
     const stkText = await stkResponse.text();
+    console.error('[v0] KCB STK Response - Status:', stkResponse.status, 'Body:', stkText, 'URL:', stkPushUrl);
+
     if (!stkResponse.ok) {
       let errorMsg = `STK Push failed (${stkResponse.status})`;
       try {
@@ -193,12 +195,21 @@ Deno.serve(async (req: Request) => {
 
     if (!stkText) {
       return new Response(
-        JSON.stringify({ error: "Empty response from KCB service" }),
+        JSON.stringify({ error: "Empty response from KCB service - no body returned" }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const stkData = JSON.parse(stkText);
+    let stkData;
+    try {
+      stkData = JSON.parse(stkText);
+    } catch (parseError) {
+      console.error('[v0] Failed to parse KCB response:', parseError, 'Text:', stkText);
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON response from KCB service" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Return success response
     return new Response(
