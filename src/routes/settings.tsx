@@ -717,7 +717,6 @@ function PaymentsTab({
           if (!kcbSettings.client_secret) missing.push('Consumer Secret');
           if (!kcbSettings.org_passkey) missing.push('Organization Pass Key');
           if (!kcbSettings.org_shortcode) missing.push('Short Code or Till Number');
-          if (kcbSettings.environment === 'production' && !kcbSettings.passkey) missing.push('Initiator Passkey');
           if (missing.length > 0) {
             return (
               <div className="mb-4 flex items-start gap-3 bg-amber-900/30 border border-amber-700 rounded-lg p-3">
@@ -806,21 +805,7 @@ function PaymentsTab({
                 <p className="text-xs text-slate-500 mt-1">{"From KCB portal: Settings > Security > Organization BUNI Pass Key"}</p>
               </div>
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1.5">
-                  Initiator Passkey <span className="text-red-400">*</span>
-                </label>
-                <input
-                  type={showSecret ? 'text' : 'password'}
-                  value={kcbSettings.passkey || ''}
-                  onChange={(e) => onMpesaChange({ ...kcbSettings, passkey: e.target.value })}
-                  className={`w-full px-4 py-3 bg-slate-700 text-white rounded-lg border focus:border-emerald-500 focus:outline-none font-mono text-sm ${
-                    !kcbSettings.passkey ? 'border-amber-600' : 'border-slate-600'
-                  }`}
-                  placeholder="Initiator Passkey for STK Push authentication"
-                />
-                <p className="text-xs text-slate-500 mt-1">{"From Safaricom portal: Security > Initiator Passkey (used for production)"}</p>
-              </div>
+
             </div>
 
             {/* SECTION 2: KCB Business Details */}
@@ -927,7 +912,6 @@ function PaymentsTab({
                   {[
                     { done: !!kcbSettings.client_id, text: 'Production Consumer Key set' },
                     { done: !!kcbSettings.client_secret, text: 'Production Consumer Secret set' },
-                    { done: !!kcbSettings.passkey, text: 'Production Passkey set (from Safaricom portal)' },
                     { done: !!(kcbSettings.org_shortcode || kcbSettings.org_passkey), text: 'Real Paybill or Till Number set' },
                     { done: true, text: 'Callback URL uses HTTPS (Supabase Edge Functions are HTTPS by default)' },
                     { done: true, text: 'Go Live approved on Daraja portal' },
