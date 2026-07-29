@@ -1,40 +1,46 @@
-import { PaymentRepository } from '../repositories/PaymentRepository';
+import { PrismaClient } from '@prisma/client';
+import { PaymentRepository, PaymentStatus } from '../repositories/PaymentRepository';
 import { PaymentRequest } from '../dto/PaymentRequest';
-import { PaymentProvider } from '../providers/PaymentProvider';
 
+/**
+ * Thin service layer that uses PaymentRepository to encapsulate
+ * higher-level flows: initiation + callback handling.
+ */
 export class PaymentService {
-  private providers: Record<string, PaymentProvider>;
-  private repository: PaymentRepository;
-  private defaultProviderKey = 'kcb_buni';
+  private repo: PaymentRepository;
 
-  constructor(repository: PaymentRepository, providers: Record<string, PaymentProvider>) {
-    this.repository = repository;
-    this.providers = providers;
+  constructor(prisma: PrismaClient) {
+    this.repo = new PaymentRepository(prisma);
   }
 
-  private getProvider(key?: string): PaymentProvider {
-    const resolved = key || this.defaultProviderKey;
-    const provider = this.providers[resolved];
-    if (!provider) throw new Error(`Payment provider not registered: ${resolved}`);
-    return provider;
-  }
-
-  public async initiatePayment(request: PaymentRequest, providerKey?: string) {
-    const provider = this.getProvider(providerKey);
-    const response = await provider.initiatePayment(request);
-
-    await this.repository.createFromInitiation({
-      provider: response.provider,
-      merchantRequestId: response.merchantRequestId,
-      checkoutRequestId: response.checkoutRequestId,
-      providerTransactionId: response.providerTransactionId,
-      phoneNumber: request.phoneNumber,
-      amount: Number(request.amount),
-      invoiceNumber: request.invoiceNumber,
-      status: response.status,
-      raw: response.raw,
+  async createInitiation(payload: PaymentRequest) {
+    // normalize inputs as PaymentRepository expects
+    return this.repo.createFromInitiation({
+      provider: payload.provider,
+      merchantRequestId: payload.merchantRequestId,
+      checkoutRequestId: payload.checkoutRequestId,
+      providerTransactionId: payload.providerTransactionId,
+      phoneNumber: payload.phoneNumber,
+      amount: payload.amount,
+      invoiceNumber: payload.invoiceNumber,
+      status: payload.status as PaymentStatus | undefined,
+      raw: payload.raw,
     });
+  }
 
-    return response;
+  /**
+   * Handle a provider callback (webhook) that identifies the payment by merchantRequestId.
+   * updates: partial fields to write back (status, receiptNumber, callback payload, etc).
+   */
+  async handleCallback(merchantRequestId: string, updates: Partial<Record<string, any>>) {
+    // defensive: ensure merchantRequestId present
+    if (!merchantRequestId) return null;
+
+    // updateFromCallback already searches and returns null if none exists
+    return this.repo.updateFromCallback(merchantRequestId, {
+      ...updates,
+      // keep callback payload under callbackPayload if provided raw
+      callbackPayload: updates.callbackPayload ?? updates.raw ?? null,
+    });
   }
 }
