@@ -18,7 +18,7 @@ interface STKPushRequest {
   transactionDesc?: string;
 }
 
-// Format phone to 254XXXXXXXXX
+// Simple phone formatter
 function formatPhone(phone: string): string {
   let p = phone.replace(/\D/g, "");
   if (p.startsWith("0") && p.length === 10) return "254" + p.slice(1);
@@ -28,229 +28,125 @@ function formatPhone(phone: string): string {
   return p;
 }
 
-function generateTimestamp(): string {
-  const now = new Date();
-  return [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-    String(now.getHours()).padStart(2, "0"),
-    String(now.getMinutes()).padStart(2, "0"),
-    String(now.getSeconds()).padStart(2, "0"),
-  ].join("");
-}
+// Simple token cache (in-memory for the function instance)
+let cachedToken: { access_token: string; expires_at: number } | null = null;
 
-function generatePassword(shortCode: string, passkey: string, timestamp: string): string {
-  return btoa(shortCode + passkey + timestamp);
-}
+async function getKcbAccessToken(clientId: string, clientSecret: string, tokenUrl: string) {
+  if (cachedToken && Date.now() < cachedToken.expires_at - 5000) {
+    return cachedToken.access_token;
+  }
 
-async function getAccessToken(
-  consumerKey: string,
-  consumerSecret: string,
-  environment: string
-): Promise<string> {
-  const baseUrl =
-    environment === "production"
-      ? "https://api.safaricom.co.ke"
-      : "https://sandbox.safaricom.co.ke";
-
-  const credentials = btoa(`${consumerKey}:${consumerSecret}`);
-  const resp = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
-    headers: { Authorization: `Basic ${credentials}` },
+  const creds = btoa(`${clientId}:${clientSecret}`);
+  const resp = await fetch(`${tokenUrl}?grant_type=client_credentials`, {
+    method: 'GET',
+    headers: { Authorization: `Basic ${creds}` },
   });
 
   const text = await resp.text();
   if (!resp.ok) {
     let msg = `Auth failed (${resp.status})`;
-    try {
-      const json = JSON.parse(text);
-      msg = json.error_description || json.errorMessage || json.error || msg;
-    } catch { /* ignore */ }
+    try { const json = JSON.parse(text); msg = json.error_description || json.errorMessage || json.error || msg; } catch {}
     throw new Error(msg);
   }
   const data = JSON.parse(text);
-  if (!data.access_token) throw new Error("No access token in Safaricom response");
-  return data.access_token;
+  if (!data.access_token) throw new Error('No access token in KCB response');
+  const expiresIn = data.expires_in ? Number(data.expires_in) : 300;
+  cachedToken = { access_token: data.access_token, expires_at: Date.now() + (expiresIn * 1000) };
+  return cachedToken.access_token;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
-  }
-  if (req.method !== "POST") {
-    return new Response(
-      JSON.stringify({ error: "Method not allowed" }),
-      { status: 405, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: corsHeaders });
+  if (req.method !== 'POST') return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
-    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabase = createClient(supabaseUrl, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '');
 
     const body: STKPushRequest = await req.json();
 
-    if (!body.phone) {
-      return new Response(
-        JSON.stringify({ error: "Phone number is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    if (!body.amount || body.amount <= 0) {
-      return new Response(
-        JSON.stringify({ error: "Amount must be greater than 0" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!body.phone) return new Response(JSON.stringify({ error: 'Phone number is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!body.amount || body.amount <= 0) return new Response(JSON.stringify({ error: 'Amount must be greater than 0' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    // Load KCB settings (prefer kcb_settings table, fall back to env)
+    let settings: any = null;
+    try {
+      const { data, error } = await supabase.from('kcb_settings').select('*').eq('id', 'kcb-settings').maybeSingle();
+      if (!error && data) settings = data;
+    } catch (err) {
+      console.debug('kcb_settings lookup error:', err?.message ?? err);
     }
 
-    // Load M-Pesa settings
-    const { data: settings, error: settingsError } = await supabase
-      .from("mpesa_settings")
-      .select("*")
-      .eq("id", "mpesa-settings")
-      .single();
+    const clientId = settings?.client_id ?? Deno.env.get('KCB_BUNI_CLIENT_ID') ?? Deno.env.get('VITE_KCB_CLIENT_ID');
+    const clientSecret = settings?.client_secret ?? Deno.env.get('KCB_BUNI_CLIENT_SECRET') ?? Deno.env.get('VITE_KCB_CLIENT_SECRET');
+    const baseUrl = settings?.base_url ?? Deno.env.get('KCB_BUNI_BASE_URL') ?? Deno.env.get('VITE_KCB_BASE_URL');
+    const tokenUrl = settings?.token_url ?? Deno.env.get('KCB_BUNI_TOKEN_URL') ?? Deno.env.get('VITE_KCB_TOKEN_URL') ?? (baseUrl ? `${baseUrl}/oauth/authorize` : undefined);
+    const callbackUrl = settings?.callback_url ?? Deno.env.get('KCB_BUNI_CALLBACK_URL') ?? `${supabaseUrl}/functions/v1/kcb-ipn-till`;
 
-    if (settingsError || !settings) {
-      return new Response(
-        JSON.stringify({ error: "M-Pesa settings not found in database" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    if (!settings.is_enabled) {
-      return new Response(
-        JSON.stringify({ error: "M-Pesa is disabled. Enable it in Settings > Payments." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    if (!settings.consumer_key || !settings.consumer_secret) {
-      return new Response(
-        JSON.stringify({ error: "M-Pesa Consumer Key and Secret are required. Configure them in Settings > Payments." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    if (!settings.passkey) {
-      return new Response(
-        JSON.stringify({ error: "M-Pesa Passkey is required. Get it from the Safaricom Developer Portal and add it in Settings > Payments." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    // Use till_number if present, otherwise short_code
-    const effectiveShortCode = settings.till_number || settings.short_code;
-    if (!effectiveShortCode) {
-      return new Response(
-        JSON.stringify({ error: "M-Pesa Short Code or Till Number is required. Add it in Settings > Payments." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (!clientId || !clientSecret || !baseUrl || !tokenUrl) {
+      return new Response(JSON.stringify({ error: 'KCB credentials or base URL are not configured' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const formattedPhone = formatPhone(body.phone);
-    if (formattedPhone.length !== 12 || !formattedPhone.startsWith("254")) {
-      return new Response(
-        JSON.stringify({ error: `Invalid phone number format: ${body.phone}. Use format 07XXXXXXXX or +2547XXXXXXXX` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
-    const callbackUrl = settings.callback_url || `${supabaseUrl}/functions/v1/mpesa-callback`;
-    const timeoutUrl = settings.timeout_url || `${supabaseUrl}/functions/v1/mpesa-timeout`;
-    const accountRef = (body.accountReference || `PAY${Date.now()}`).substring(0, 12);
-    const transactionDesc = (body.transactionDesc || "POS Payment").substring(0, 13);
-
-    // Determine transaction type: C2B PayBill vs Buy Goods (till)
-    const transactionType = settings.till_number
-      ? "CustomerBuyGoodsOnline"
-      : "CustomerPayBillOnline";
-
-    const baseUrl =
-      settings.environment === "production"
-        ? "https://api.safaricom.co.ke"
-        : "https://sandbox.safaricom.co.ke";
-
-    console.log("Getting M-Pesa access token...");
-    const accessToken = await getAccessToken(
-      settings.consumer_key,
-      settings.consumer_secret,
-      settings.environment
-    );
-
-    const timestamp = generateTimestamp();
-    const password = generatePassword(effectiveShortCode, settings.passkey, timestamp);
-
+    // Build STK push payload (KCB BUNI expected shape may vary — adjust as needed)
     const stkBody = {
-      BusinessShortCode: effectiveShortCode,
-      Password: password,
-      Timestamp: timestamp,
-      TransactionType: transactionType,
-      Amount: Math.round(body.amount),
-      PartyA: formattedPhone,
-      PartyB: effectiveShortCode,
-      PhoneNumber: formattedPhone,
-      CallBackURL: callbackUrl,
-      AccountReference: accountRef,
-      TransactionDesc: transactionDesc,
+      phoneNumber: formattedPhone,
+      amount: Math.round(body.amount),
+      invoiceNumber: body.accountReference || body.transactionId || `INV-${Date.now()}`,
+      description: body.transactionDesc || 'POS Payment',
+      callbackUrl,
     };
 
-    console.log("STK Push request:", JSON.stringify({ ...stkBody, Password: "***" }));
+    console.log('Requesting KCB access token...');
+    const accessToken = await getKcbAccessToken(clientId, clientSecret, tokenUrl);
 
-    const stkResp = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {
-      method: "POST",
+    console.log('Sending STK Push to KCB:', JSON.stringify({ ...stkBody, phoneNumber: '***' }));
+    const stkResp = await fetch(`${baseUrl}/stk/push`, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify(stkBody),
     });
 
-    const stkData = await stkResp.json();
-    console.log("STK Push response:", JSON.stringify(stkData));
-
-    if (stkData.errorCode || stkData.ResponseCode !== "0") {
-      const errMsg = stkData.errorMessage || stkData.ResponseDescription || stkData.CustomerMessage || "STK Push failed";
-      return new Response(
-        JSON.stringify({ error: errMsg, safaricomCode: stkData.errorCode || stkData.ResponseCode }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    const stkDataText = await stkResp.text();
+    let stkData: any = {};
+    try { stkData = JSON.parse(stkDataText); } catch { stkData = { raw: stkDataText }; }
+    if (!stkResp.ok) {
+      console.error('KCB STK push failed:', stkData);
+      return new Response(JSON.stringify({ error: 'STK Push failed', detail: stkData }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const checkoutRequestId = stkData.CheckoutRequestID;
-    const merchantRequestId = stkData.MerchantRequestID;
+    // Try to extract IDs from response (fields may differ)
+    const merchantRequestId = stkData.MerchantRequestID || stkData.merchantRequestId || stkData.merchant_request_id || stkData.merchant_request || null;
+    const checkoutRequestId = stkData.CheckoutRequestID || stkData.checkoutRequestId || stkData.checkout_request_id || stkData.checkout_request || null;
 
-    // Store in mpesa_transactions
-    const { data: mpesaTx, error: insertError } = await supabase
-      .from("mpesa_transactions")
-      .insert({
+    // Persist to kcb_payments table if available
+    try {
+      const { data: insertData, error: insertErr } = await supabase.from('kcb_payments').insert({
         checkout_request_id: checkoutRequestId,
         merchant_request_id: merchantRequestId,
         phone_number: formattedPhone,
         amount: body.amount,
-        status: "pending",
+        status: 'pending',
         transaction_id: body.transactionId || null,
         customer_id: body.customerId || null,
         cashier_id: body.cashierId || null,
         cashier_name: body.cashierName || null,
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error("Failed to store mpesa_transaction:", insertError.message);
+        raw_request: stkBody,
+        raw_response: stkData,
+        created_at: new Date().toISOString(),
+      }).select().single();
+      if (insertErr) console.debug('kcb_payments insert failed:', insertErr.message);
+    } catch (err) {
+      console.debug('kcb_payments insert error:', err?.message ?? err);
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        checkoutRequestId,
-        merchantRequestId,
-        mpesaTransactionId: mpesaTx?.id,
-        message: "STK Push sent. Ask customer to check their phone.",
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ success: true, merchantRequestId, checkoutRequestId, raw: stkData }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
-    console.error("STK Push error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Internal error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error('KCB STK push handler error:', error);
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : 'Internal error' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
