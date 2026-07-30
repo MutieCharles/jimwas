@@ -56,6 +56,27 @@ Deno.serve(async (req: Request) => {
 
     console.log('KCB IPN (TILL) received:', JSON.stringify(body));
 
+    // Dedupe: look for existing notification by transactionReference or requestId
+    try {
+      let found = null;
+      if (body.transactionReference) {
+        const { data } = await supabase.from('kcb_notifications').select('id,payload').eq("payload->>transactionReference", body.transactionReference).maybeSingle();
+        found = data ?? null;
+      }
+      if (!found && body.requestId) {
+        const { data } = await supabase.from('kcb_notifications').select('id,payload').eq("payload->>requestId", body.requestId).maybeSingle();
+        found = data ?? null;
+      }
+      if (found) {
+        console.log('Duplicate notification received, returning ack');
+        const existingId = found.id;
+        const response = { transactionID: String(existingId), statusCode: 0, statusMessage: 'Notification already processed' };
+        return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    } catch (err) {
+      console.debug('kcb_notifications lookup for dedupe failed:', err?.message ?? err);
+    }
+
     // Expected fields (from spec): transactionReference, requestId, channelCode, timestamp,
     // transactionAmount, currency, customerReference, customerName, customerMobileNumber,
     // balance, narration, creditAccountIdentifier, organizationShortCode, tillNumber
@@ -72,7 +93,7 @@ Deno.serve(async (req: Request) => {
 
     // Try to persist notification to kcb_notifications (best-effort). If table doesn't exist, ignore.
     try {
-      await supabase.from('kcb_notifications').insert([{ payload: body, received_at: new Date().toISOString() }]);
+      await supabase.from('kcb_notifications').insert([{ payload: body, received_at: new Date().toISOString(), transaction_reference: body.transactionReference ?? null, request_id: body.requestId ?? null }]);
     } catch (err) {
       console.debug('Could not insert into kcb_notifications (table may not exist):', err?.message ?? err);
     }

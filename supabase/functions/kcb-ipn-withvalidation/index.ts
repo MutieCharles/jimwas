@@ -69,6 +69,21 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(failure), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Dedupe: if we've already processed this requestId, return the previous response
+    try {
+      const { data: existing } = await supabase
+        .from('kcb_validations')
+        .select('response')
+        .eq("request->>requestId", body.requestId)
+        .maybeSingle();
+      if (existing && existing.response) {
+        console.log('Duplicate validation request detected, returning existing response');
+        return new Response(JSON.stringify(existing.response), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    } catch (err) {
+      console.debug('kcb_validations lookup for dedupe failed:', err?.message ?? err);
+    }
+
     // Best-effort: look up invoice/bill in DB
     let billRecord: any = null;
     try {
@@ -94,9 +109,9 @@ Deno.serve(async (req: Request) => {
     };
 
     try {
-      await supabase.from("kcb_validations").insert([{ request: body, response, received_at: new Date().toISOString() }]);
+      await supabase.from("kcb_validations").insert([{ request: body, response, received_at: new Date().toISOString(), request_id: body.requestId }]);
     } catch (err) {
-      console.debug("Could not persist validation row (table may not exist):", err?.message ?? err);
+      console.debug("Could not persist validation row (table may not exist or add-on columns not present):", err?.message ?? err);
     }
 
     return new Response(JSON.stringify(response), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
