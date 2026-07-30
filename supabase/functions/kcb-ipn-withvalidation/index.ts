@@ -1,10 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.39.3";
+import { verifySignature } from "../lib/signature.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey, Signature, X-Signature",
 };
 
 interface ValidationRequest {
@@ -21,7 +22,36 @@ Deno.serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "");
-    const body: ValidationRequest = await req.json();
+
+    const signatureHeader = req.headers.get('Signature') || req.headers.get('X-Signature') || req.headers.get('x-signature');
+    if (!signatureHeader) {
+      console.warn('Missing signature header for validation request');
+      return new Response(JSON.stringify({ error: 'Missing signature' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Fetch public cert from kcb_settings or env
+    let publicPem: string | null = null;
+    try {
+      const { data } = await supabase.from('kcb_settings').select('public_cert').eq('id', 'kcb-settings').maybeSingle();
+      publicPem = data?.public_cert ?? null;
+    } catch (err) {
+      console.debug('kcb_settings lookup failed:', err?.message ?? err);
+    }
+    if (!publicPem) publicPem = Deno.env.get('KCB_BUNI_PUBLIC_CERT') ?? Deno.env.get('VITE_KCB_PUBLIC_CERT') ?? null;
+    if (!publicPem) {
+      console.error('Public cert not configured for KCB validation signature verification');
+      return new Response(JSON.stringify({ error: 'Public cert not configured' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const raw = await req.text();
+
+    const valid = await verifySignature(publicPem, raw, signatureHeader);
+    if (!valid) {
+      console.warn('Signature verification failed for validation request');
+      return new Response(JSON.stringify({ error: 'Invalid signature' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const body: ValidationRequest = JSON.parse(raw);
 
     console.log("KCB Bill-Validation request:", JSON.stringify(body));
 
