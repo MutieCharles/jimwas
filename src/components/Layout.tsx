@@ -33,7 +33,7 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
 
   // Primary navigation items (always visible)
   const primaryNavItems = [
-    { id: 'pos', label: 'POS', icon: ShoppingCart },
+    { id: 'pos', label: 'Sell', icon: ShoppingCart },
     { id: 'customers', label: 'Customers', icon: Users },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'inventory', label: 'Inventory', icon: Warehouse },
@@ -90,7 +90,7 @@ export function Layout({ children, currentPage, onNavigate, user }: LayoutProps)
   };
 
   const allItems = [...primaryNavItems, ...allSecondaryItems];
-  const currentPageLabel = allItems.find((item) => item.id === currentPage)?.label || 'POS System';
+  const currentPageLabel = allItems.find((item) => item.id === currentPage)?.label || 'Jimwas';
 
   return (
     <div className="h-screen bg-slate-900 flex flex-col overflow-hidden">
