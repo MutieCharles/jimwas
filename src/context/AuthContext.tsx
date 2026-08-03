@@ -25,10 +25,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function init() {
       try {
         // Initialize app (default settings, etc.)
-        await initializeApp();
+        await Promise.race([
+          initializeApp(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('initializeApp timeout')), 5000))
+        ]);
 
         // Check if we should auto-restore from last backup
-        const needsRestore = await shouldAutoRestore();
+        const needsRestore = await Promise.race([
+          shouldAutoRestore(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('shouldAutoRestore timeout')), 5000))
+        ]);
         if (needsRestore) {
           console.log('[v0] Auto-restoring backup data from previous session...');
           // Note: Actual restore logic happens in backup module on-demand
@@ -36,13 +42,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         // Initialize security data (roles, permissions, admin user)
-        await initializeSecurity();
+        await Promise.race([
+          initializeSecurity(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('initializeSecurity timeout')), 5000))
+        ]);
 
         // Get current session
         const currentUser = await getCurrentUser();
         setUser(currentUser);
       } catch (error) {
-        console.error('Auth init error:', error);
+        console.error('[v0] Auth init error:', error);
+        // Continue anyway - allow app to load even if init fails
       } finally {
         setIsLoading(false);
       }
