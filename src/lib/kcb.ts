@@ -10,8 +10,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || '';
-const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export interface KCBSettings {
   id?: string;
@@ -162,7 +162,7 @@ export async function updateKCBSettings(
 export async function createBill(bill: BillRecord): Promise<BillRecord | null> {
   const supabase = getSupabaseClient();
 
-  const { data, error } = await supabase.from('bill_validations').insert({
+  const { error } = await supabase.from('bill_validations').insert({
     invoice_number: bill.invoiceNumber,
     org_short_code: bill.orgShortCode,
     phone_number: bill.phoneNumber,
@@ -251,7 +251,7 @@ export async function getTillTransactions(
     return [];
   }
 
-  return (data || []) as KCBTransaction[];
+  return data as KCBTransaction[];
 }
 
 /**
@@ -303,7 +303,8 @@ export async function validateBillRequest(
       }
     );
 
-    return await response.json();
+    const responseData = await response.json();
+    return responseData as BillValidationResponse;
   } catch (error) {
     console.error('[v0] Error validating bill:', error);
     return {

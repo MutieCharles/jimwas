@@ -1058,7 +1058,8 @@ export async function getSecurityEventsByUser(userId: string): Promise<SecurityE
 
 export async function getUnresolvedSecurityEvents(): Promise<SecurityEvent[]> {
   const db = await getDB();
-  return db.getAllFromIndex('security_events', 'by-resolved', false);
+  const allEvents = await db.getAll('security_events');
+  return allEvents.filter(event => !event.is_resolved);
 }
 
 // Price change history operations
